@@ -144,7 +144,7 @@ class AIModel:
             
             # Reduce n_playout for faster web response.
             # PyTorch CPU is faster, so we can afford slightly more playouts than pure Numpy
-            # But kept moderate for free tier.
+            # Railway has better CPU than Render free tier usually.
             self.mcts_player = MCTSPlayer(best_policy.policy_value_fn, c_puct=5, n_playout=400)
             print("Model loaded successfully (PyTorch Backend).")
         except Exception as e:
