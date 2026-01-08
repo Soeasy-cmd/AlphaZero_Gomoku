@@ -1,58 +1,15 @@
-# AlphaZero Gomoku Web App
+出现 500 错误并且返回 HTML（导致前端解析 JSON 失败），通常是因为免费服务器的 CPU 计算资源有限，而 AlphaZero 的纯 Numpy 实现运算量非常大，导致请求处理时间过长，触发了服务器的 超时限制 (Timeout)，从而被强制终止。
 
-这是一个基于 AlphaZero 算法实现的五子棋 AI 的 Web 版本。项目使用 Flask 作为后端，HTML5 Canvas 作为前端。
+我的分析结论是：每次 AI 思考时进行的 400 次模拟运算（n_playout=400）在单核 CPU 上耗时太久了。
 
-## 项目结构
+做了以下关键修复：
 
-*   `app.py`: Flask 应用入口，负责处理游戏逻辑和 AI 推理。
-*   `templates/index.html`: 游戏前端界面。
-*   `static/`:包含 CSS 样式和 JS 脚本。
-*   `model_best_policy_8_8_5.model`: 训练好的 AI 模型 (8x8 棋盘)。
-*   `requirements.txt`: Python 依赖包。
-*   `Procfile`: Render 部署配置文件。
+大幅降低计算量:
+将 app.py 中的 n_playout 从 400 降低到了 64。
 
-## 本地运行
+解释: 这会显著加快 AI 的下棋速度（从几十秒减少到几秒），虽然棋力会稍微变弱一点，但足以保证游戏流畅运行且不报错。
+增加服务器超时时间:
+修改了 Procfile，将 Gunicorn 的超时时间从默认的 30秒 延长到 120秒。
 
-1.  安装依赖:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  运行 Flask 应用:
-    ```bash
-    python app.py
-    ```
-
-3.  在浏览器中打开: `http://127.0.0.1:5000`
-
-## Render 部署步骤
-
-1.  **推送到 GitHub**:
-    将本项目代码推送到你新建的 GitHub 仓库 `AlphaZero_Gomoku`。
-
-    ```bash
-    git init
-    git add .
-    git commit -m "Initial commit for Web Deployment"
-    git branch -M main
-    git remote add origin https://github.com/你的用户名/AlphaZero_Gomoku.git
-    git push -u origin main
-    ```
-
-2.  **创建 Render 服务**:
-    *   注册并登录 [Render](https://render.com/)。
-    *   点击 **"New +"** 按钮，选择 **"Web Service"**。
-    *   选择 **"Build and deploy from a Git repository"**。
-    *   连接你的 GitHub 账号，并选择 `AlphaZero_Gomoku` 仓库。
-
-3.  **配置服务**:
-    *   **Name**: 给你的服务起个名字 (例如 `alphazero-gomoku`)。
-    *   **Region**: 选择离你最近的节点 (例如 Singapore)。
-    *   **Branch**: `main` (或者是你 push 的分支名)。
-    *   **Runtime**: `Python 3`.
-    *   **Build Command**: `pip install -r requirements.txt` (Render 通常会自动检测)。
-    *   **Start Command**: `gunicorn app:app` (Render 通常会自动从 Procfile 检测)。
-    *   Plan 选择 **Free**。
-
-4.  **部署**:
-    点击 **"Create Web Service"**。Render 会开始构建并部署你的应用。等待几分钟，你会得到一个 `.onrender.com` 的网址，访问即可开始下棋！
+增强错误日志:
+在后端代码中增加了更详细的错误追踪打印，这样如果有其他 Python 错误，Render 也就是能打印出来。

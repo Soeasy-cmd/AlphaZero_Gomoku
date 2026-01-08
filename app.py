@@ -2,10 +2,119 @@ import pickle
 from flask import Flask, render_template, jsonify, request
 from game import Board, Game
 from mcts_alphaZero import MCTSPlayer
-from policy_value_net_numpy import PolicyValueNetNumpy
 import os
+import torch
+import numpy as np
+import torch.nn as nn
+import torch.nn.functional as F
 
 app = Flask(__name__)
+
+# --- PyTorch Model Definition (Inline to avoid file dependency issues) ---
+class Net(nn.Module):
+    def __init__(self, board_width, board_height):
+        super(Net, self).__init__()
+        self.board_width = board_width
+        self.board_height = board_height
+        # common layers
+        self.conv1 = nn.Conv2d(4, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        # action policy layers
+        self.act_conv1 = nn.Conv2d(128, 4, kernel_size=1)
+        self.act_fc1 = nn.Linear(4*board_width*board_height,
+                                 board_width*board_height)
+        # state value layers
+        self.val_conv1 = nn.Conv2d(128, 2, kernel_size=1)
+        self.val_fc1 = nn.Linear(2*board_width*board_height, 64)
+        self.val_fc2 = nn.Linear(64, 1)
+
+    def forward(self, state_input):
+        # common layers
+        x = F.relu(self.conv1(state_input))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        # action policy layers
+        x_act = F.relu(self.act_conv1(x))
+        x_act = x_act.view(-1, 4*self.board_width*self.board_height)
+        x_act = F.log_softmax(self.act_fc1(x_act), dim=1)
+        # state value layers
+        x_val = F.relu(self.val_conv1(x))
+        x_val = x_val.view(-1, 2*self.board_width*self.board_height)
+        x_val = F.relu(self.val_fc1(x_val))
+        x_val = torch.tanh(self.val_fc2(x_val))
+        return x_act, x_val
+
+class PolicyValueNetPytorch:
+    def __init__(self, board_width, board_height, net_params):
+        self.device = torch.device("cpu")
+        self.policy_value_net = Net(board_width, board_height).to(self.device)
+        self.load_params_from_numpy(net_params)
+        self.policy_value_net.eval()
+
+    def load_params_from_numpy(self, params):
+        # Theano params order in the pickle file based on policy_value_net_numpy.py investigation
+        # [conv1_w, conv1_b, conv2_w, conv2_b, conv3_w, conv3_b, 
+        #  act_conv1_w, act_conv1_b, act_fc1_w, act_fc1_b,
+        #  val_conv1_w, val_conv1_b, val_fc1_w, val_fc1_b, val_fc2_w, val_fc2_b]
+        
+        # Helper to convert numpy array to torch parameter
+        def to_param(arr):
+             return torch.nn.Parameter(torch.from_numpy(arr).float())
+
+        state_dict = self.policy_value_net.state_dict()
+        
+        # 0, 1: conv1
+        # Theano weights are flipped for convolution. PyTorch does correlation.
+        # So we need to flip the weights to match Theano's behavior.
+        state_dict['conv1.weight'] = torch.from_numpy(params[0][:, :, ::-1, ::-1].copy()).float()
+        state_dict['conv1.bias'] = torch.from_numpy(params[1]).float()
+        
+        # 2, 3: conv2
+        state_dict['conv2.weight'] = torch.from_numpy(params[2][:, :, ::-1, ::-1].copy()).float()
+        state_dict['conv2.bias'] = torch.from_numpy(params[3]).float()
+        
+        # 4, 5: conv3
+        state_dict['conv3.weight'] = torch.from_numpy(params[4][:, :, ::-1, ::-1].copy()).float()
+        state_dict['conv3.bias'] = torch.from_numpy(params[5]).float()
+        
+        # 6, 7: act_conv1
+        state_dict['act_conv1.weight'] = torch.from_numpy(params[6][:, :, ::-1, ::-1].copy()).float()
+        state_dict['act_conv1.bias'] = torch.from_numpy(params[7]).float()
+        
+        # 8, 9: act_fc1
+        # Numpy: dot(x, W) -> W shape (in, out). PyTorch: linear(x, W) -> W shape (out, in).
+        # So we need transpose.
+        state_dict['act_fc1.weight'] = torch.from_numpy(params[8].T).float()
+        state_dict['act_fc1.bias'] = torch.from_numpy(params[9]).float()
+        
+        # 10, 11: val_conv1
+        state_dict['val_conv1.weight'] = torch.from_numpy(params[10][:, :, ::-1, ::-1].copy()).float()
+        state_dict['val_conv1.bias'] = torch.from_numpy(params[11]).float()
+        
+        # 12, 13: val_fc1
+        state_dict['val_fc1.weight'] = torch.from_numpy(params[12].T).float()
+        state_dict['val_fc1.bias'] = torch.from_numpy(params[13]).float()
+        
+        # 14, 15: val_fc2
+        state_dict['val_fc2.weight'] = torch.from_numpy(params[14].T).float()
+        state_dict['val_fc2.bias'] = torch.from_numpy(params[15]).float()
+
+        self.policy_value_net.load_state_dict(state_dict)
+
+    def policy_value_fn(self, board):
+        legal_positions = board.availables
+        current_state = np.ascontiguousarray(board.current_state().reshape(
+                -1, 4, self.policy_value_net.board_width, self.policy_value_net.board_height))
+        
+        with torch.no_grad():
+            log_act_probs, value = self.policy_value_net(
+                    torch.from_numpy(current_state).float().to(self.device))
+            act_probs = np.exp(log_act_probs.cpu().numpy().flatten())
+            value = value.item()
+            
+        act_probs = zip(legal_positions, act_probs[legal_positions])
+        return act_probs, value
 
 # Load Model
 class AIModel:
@@ -29,12 +138,15 @@ class AIModel:
             except:
                 policy_param = pickle.load(open(self.model_file, 'rb'), encoding='bytes')
 
-            best_policy = PolicyValueNetNumpy(self.width, self.height, policy_param)
+            # Use PyTorch implementation for speed
+            # best_policy = PolicyValueNetNumpy(self.width, self.height, policy_param)
+            best_policy = PolicyValueNetPytorch(self.width, self.height, policy_param)
+            
             # Reduce n_playout for faster web response.
-            # Pure Numpy implementation is slow on CPU. 
-            # 400 is too high for free tier (timeout). 64 is a compromise.
-            self.mcts_player = MCTSPlayer(best_policy.policy_value_fn, c_puct=5, n_playout=64)
-            print("Model loaded successfully.")
+            # PyTorch CPU is faster, so we can afford slightly more playouts than pure Numpy
+            # But kept moderate for free tier.
+            self.mcts_player = MCTSPlayer(best_policy.policy_value_fn, c_puct=5, n_playout=400)
+            print("Model loaded successfully (PyTorch Backend).")
         except Exception as e:
             print(f"Error loading model: {e}")
             import traceback
