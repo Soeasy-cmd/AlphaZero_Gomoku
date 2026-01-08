@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaZero 五子棋</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AlphaZero Gomoku</h1>
+            <p>基于 AlphaZero 算法的五子棋 AI (8x8)</p>
+        </header>
+
+        <div class="game-area">
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="dot player-dot"></span> 玩家 (黑棋)
+                </div>
+                <div class="status-item">
+                    <span class="dot ai-dot"></span> AI (白棋)
+                </div>
+                <div id="game-status" class="status-text">轮到你下棋</div>
+            </div>
+
+            <div class="board-wrapper">
+                <canvas id="board" width="450" height="450"></canvas>
+            </div>
+
+            <div class="controls">
+                <button id="restart-btn" class="btn">重新开始</button>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Powered by Flask & AlphaZero</p>
+        </footer>
+    </div>
+    
+    <!-- Modal for Game Over -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <h2 id="modal-title">游戏结束</h2>
+            <p id="modal-message"></p>
+            <button id="modal-restart" class="btn">再来一局</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
