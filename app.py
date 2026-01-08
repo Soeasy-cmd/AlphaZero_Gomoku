@@ -30,11 +30,15 @@ class AIModel:
                 policy_param = pickle.load(open(self.model_file, 'rb'), encoding='bytes')
 
             best_policy = PolicyValueNetNumpy(self.width, self.height, policy_param)
-            # Reduce n_playout for faster web response if needed, 400 is fine
-            self.mcts_player = MCTSPlayer(best_policy.policy_value_fn, c_puct=5, n_playout=400)
+            # Reduce n_playout for faster web response.
+            # Pure Numpy implementation is slow on CPU. 
+            # 400 is too high for free tier (timeout). 64 is a compromise.
+            self.mcts_player = MCTSPlayer(best_policy.policy_value_fn, c_puct=5, n_playout=64)
             print("Model loaded successfully.")
         except Exception as e:
             print(f"Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
 
 ai = AIModel()
 
@@ -85,7 +89,9 @@ def get_move():
         })
 
     except Exception as e:
-        print(e)
+        print(f"CRITICAL ERROR in get_move: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
